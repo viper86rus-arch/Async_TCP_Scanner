@@ -6,6 +6,11 @@ A high-performance, asynchronous TCP port scanner built on Python's asyncio.
 Uses a semaphore to enforce a strict concurrency ceiling and asyncio.wait_for
 for hard connection timeouts — giving you full resource control at scale.
 
+Supports passive banner grabbing: after a successful connection the scanner
+waits up to 1 s for a server-initiated response; if the server is silent an
+HTTP GET trigger is sent and the reply is captured.  The first line of each
+banner is stored per-port in the ScanResult and written to the JSON export.
+
 Author  : Portfolio Project
 License : MIT
 """
@@ -57,6 +62,7 @@ class ScanResult:
     concurrency: int
     timeout: float
     open_ports: list[int] = field(default_factory=list)
+    banners: dict[int, str] = field(default_factory=dict)
     scan_duration_seconds: float = 0.0
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -66,6 +72,8 @@ class ScanResult:
         """Serialize to a plain dictionary suitable for JSON export."""
         data = asdict(self)
         data["port_range"] = list(self.port_range)   # tuples aren't JSON-native
+        # JSON keys must be strings; convert int port keys.
+        data["banners"] = {str(k): v for k, v in self.banners.items()}
         return data
 
 
@@ -98,9 +106,48 @@ class AsyncPortScanner:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _probe_port(self, port: int) -> Optional[int]:
+    async def _grab_banner(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> str:
         """
-        Attempt a TCP connection to *port* on self.target.
+        Attempt to retrieve a service banner from an already-open connection.
+
+        Strategy:
+          1. Wait up to 1 s for a server-initiated greeting.
+          2. If the server is silent, send an HTTP GET trigger and wait again.
+          3. Decode the raw bytes, strip control characters, and return only
+             the first non-empty line as the banner.
+
+        Args:
+            reader : Stream reader for the established connection.
+            writer : Stream writer (used to send the HTTP trigger if needed).
+
+        Returns:
+            A single-line string with the banner, or an empty string if none.
+        """
+        raw = b""
+        try:
+            raw = await asyncio.wait_for(reader.read(1024), timeout=1.0)
+        except asyncio.TimeoutError:
+            pass
+
+        if not raw:
+            # Server didn't send anything — try an HTTP GET trigger.
+            try:
+                writer.write(b"GET / HTTP/1.1\r\n\r\n")
+                await writer.drain()
+                raw = await asyncio.wait_for(reader.read(1024), timeout=1.0)
+            except (asyncio.TimeoutError, OSError):
+                pass
+
+        if not raw:
+            return ""
+
+        decoded = raw.decode(errors="replace")
+        first_line = decoded.split("\n")[0].strip()
+        return first_line
+
+    async def _probe_port(self, port: int) -> Optional[tuple[int, str]]:
+        """
+        Attempt a TCP connection to *port* on self.target and grab its banner.
 
         Uses asyncio.wait_for to enforce a hard timeout, and the shared
         semaphore to cap simultaneous connections.
@@ -109,21 +156,28 @@ class AsyncPortScanner:
             port: The TCP port number to probe.
 
         Returns:
-            The port number if it is open, otherwise None.
+            A (port, banner) tuple if the port is open, otherwise None.
         """
         async with self._semaphore:
             try:
-                _, writer = await asyncio.wait_for(
+                reader, writer = await asyncio.wait_for(
                     asyncio.open_connection(self.target, port),
                     timeout=self.timeout,
                 )
+
+                banner = await self._grab_banner(reader, writer)
+
                 writer.close()
                 try:
                     await writer.wait_closed()
                 except Exception:
                     pass
-                logger.debug("Port %d  ->  OPEN", port)
-                return port
+
+                if banner:
+                    logger.debug("Port %d  ->  OPEN  |  banner: %s", port, banner)
+                else:
+                    logger.debug("Port %d  ->  OPEN", port)
+                return port, banner
 
             except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
                 logger.debug("Port %d  ->  closed / filtered", port)
@@ -175,13 +229,19 @@ class AsyncPortScanner:
 
         # Gather with return_exceptions=False; individual exceptions are
         # already caught inside _probe_port, so this won't mask errors.
-        raw_results: list[Optional[int]] = await asyncio.gather(
+        raw_results: list[Optional[tuple[int, str]]] = await asyncio.gather(
             *tasks, return_exceptions=False
         )
 
         elapsed = time.perf_counter() - t0
 
-        open_ports = sorted(p for p in raw_results if p is not None)
+        open_entries = sorted(
+            (port, banner) for port, banner in (r for r in raw_results if r is not None)
+        )
+        open_ports = [port for port, _ in open_entries]
+        banners: dict[int, str] = {
+            port: banner for port, banner in open_entries if banner
+        }
 
         result = ScanResult(
             target=self.target,
@@ -190,6 +250,7 @@ class AsyncPortScanner:
             concurrency=self.concurrency,
             timeout=self.timeout,
             open_ports=open_ports,
+            banners=banners,
             scan_duration_seconds=round(elapsed, 3),
         )
 
@@ -204,6 +265,12 @@ class AsyncPortScanner:
         logger.info("Open ports found : %d", len(result.open_ports))
         if result.open_ports:
             logger.info("Open ports       : %s", result.open_ports)
+            if result.banners:
+                logger.info("Banners captured : %d", len(result.banners))
+                for port in result.open_ports:
+                    banner = result.banners.get(port, "")
+                    if banner:
+                        logger.info("  %-6d  %s", port, banner)
         else:
             logger.info("No open ports detected in the specified range.")
         logger.info("-" * 60)
