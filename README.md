@@ -11,9 +11,10 @@ A **high-performance, production-grade TCP port scanner** built in pure Python u
 | **Asynchronous I/O** | Built entirely on `asyncio` — thousands of probes run concurrently in a single thread |
 | **Semaphore control** | `asyncio.Semaphore` enforces a hard cap on simultaneous connections (default: 500) |
 | **Hard timeouts** | `asyncio.wait_for` guarantees each probe is killed after N seconds — no hangs |
+| **Banner Grabbing** | Passively waits for a server greeting; falls back to an HTTP GET trigger if the server is silent — the first response line is captured as the banner |
 | **Clean CLI** | `argparse`-powered interface; specify target, port range, concurrency, timeout, and output |
 | **Levelled logging** | `INFO` by default (strategic output only); `--verbose` enables per-port `DEBUG` traces |
-| **JSON export** | Full scan metadata and open port list written to structured JSON |
+| **JSON export** | Full scan metadata, open port list, and captured banners written to structured JSON |
 | **Type-annotated** | PEP 8 compliant, fully typed with `dataclasses` and `typing` hints |
 | **Graceful shutdown** | `KeyboardInterrupt` is caught cleanly — no tracebacks on Ctrl+C |
 
@@ -81,6 +82,9 @@ options:
 20:41:05  INFO      Scan complete in 3.142s
 20:41:05  INFO      Open ports found : 3
 20:41:05  INFO      Open ports       : [22, 80, 9929]
+20:41:05  INFO      Banners captured : 2
+20:41:05  INFO        22     SSH-2.0-OpenSSH_6.6.1p1 Ubuntu-2ubuntu2.13
+20:41:05  INFO        80     HTTP/1.1 400 Bad Request
 20:41:05  INFO      ------------------------------------------------------------
 20:41:05  INFO      Results exported -> D:\AI_Server\Async_TCP_Scanner\results\scan.json
 ```
@@ -99,6 +103,10 @@ When `--output` is specified, a structured report is written to disk:
   "concurrency": 500,
   "timeout": 1.0,
   "open_ports": [22, 80, 9929],
+  "banners": {
+    "22": "SSH-2.0-OpenSSH_6.6.1p1 Ubuntu-2ubuntu2.13",
+    "80": "HTTP/1.1 400 Bad Request"
+  },
   "scan_duration_seconds": 3.142,
   "timestamp": "2026-10-11T15:41:05.123456+00:00"
 }
@@ -124,6 +132,14 @@ The semaphore acts as a **token bucket** — at most N probes run at any moment.
 
 ### Single DNS resolution
 The target hostname is resolved **once** via `socket.gethostbyname()` before any probes begin. This prevents hammering DNS servers and ensures all probes target a consistent IP throughout the scan.
+
+### Banner grabbing — `_grab_banner`
+After each successful TCP handshake, `_grab_banner` attempts to identify the service without slowing down the overall scan:
+1. **Passive read** — waits up to **1 second** for a server-initiated greeting (SSH, FTP, SMTP banners, etc.).
+2. **Active trigger** — if the server is silent, sends `GET / HTTP/1.1\r\n\r\n` and waits another **1 second** for the response (catches HTTP servers that only reply to requests).
+3. Only the **first line** of the response is kept (`split('\n')[0].strip()`), avoiding multi-line noise.
+
+The 1-second cap per phase ensures banner grabbing never becomes the bottleneck — a port that yields no banner adds at most 2 s of extra latency, absorbed by the semaphore-controlled concurrency pool. Ports with no banner are still reported as open; only ports with a non-empty first line receive a `banners` entry in the JSON output.
 
 ---
 
