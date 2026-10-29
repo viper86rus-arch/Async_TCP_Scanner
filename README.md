@@ -185,7 +185,7 @@ usage: scanner [-h] [-p START-END] [-c N] [-t SECS] [-o FILE] [-v] target
 | **Резолвинг DNS** | Однократный предварительный (`socket.gethostbyname`) |
 | **Форматы экспорта** | CLI stdout / структурированный JSON с таймингами |
 | **Обработка сигналов** | Корректный перехват `SIGINT` (Ctrl+C) |
-| **Кроссплатформенность** | Linux, macOS, Windows, Android (Termux / Antigravity) |
+| **Кроссплатформенность** | Linux (Ubuntu, Debian, RHEL), macOS, Windows |
 
 ---
 
