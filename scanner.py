@@ -1,43 +1,43 @@
 #!/usr/bin/env python3
 """
-Async TCP Port Scanner
-======================
-A high-performance, asynchronous TCP port scanner built on Python's asyncio.
-Uses a semaphore to enforce a strict concurrency ceiling and asyncio.wait_for
-for hard connection timeouts — giving you full resource control at scale.
+⚡ Async TCP Port Scanner (scanner.py)
+=====================================
+Высокопроизводительный асинхронный сканер TCP-портов на базе Python asyncio.
+Использует asyncio.Semaphore для строгого контроля параллелизма и asyncio.wait_for
+для жестких таймаутов соединений при масштабном сканировании.
 
-Supports passive banner grabbing: after a successful connection the scanner
-waits up to 1 s for a server-initiated response; if the server is silent an
-HTTP GET trigger is sent and the reply is captured.  The first line of each
-banner is stored per-port in the ScanResult and written to the JSON export.
+Поддерживает гибридный захват баннеров сервисов (Active/Passive Banner Grabbing):
+1. Ожидание серверного приветствия (SSH, FTP, SMTP).
+2. При молчании — отправка триггерного HTTP GET запроса.
+Результаты структурируются и экспортируются в JSON.
 
-Author  : Portfolio Project
-License : MIT
+Автор: viper86rus-arch (@V1PER86RUS)
+Лицензия: MIT
 """
 
-import asyncio
 import argparse
+import asyncio
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 import json
 import logging
+from pathlib import Path
 import socket
 import sys
 import time
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
 
-# ---------------------------------------------------------------------------
-# Logging Setup
-# ---------------------------------------------------------------------------
+# ==============================================================================
+# 1. НАСТРОЙКА ЛОГИРОВАНИЯ
+# ==============================================================================
 
 def configure_logging(verbose: bool = False) -> None:
     """
-    Configure a clean, levelled logging format.
+    Настройка формата и уровня логирования сканера.
 
     Args:
-        verbose: When True, sets level to DEBUG; otherwise INFO.
+        verbose: При True устанавливает уровень DEBUG; иначе INFO.
     """
     level = logging.DEBUG if verbose else logging.INFO
     fmt = "%(asctime)s  %(levelname)-8s  %(message)s"
@@ -48,13 +48,13 @@ def configure_logging(verbose: bool = False) -> None:
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Data Models
-# ---------------------------------------------------------------------------
+# ==============================================================================
+# 2. МОДЕЛИ ДАННЫХ
+# ==============================================================================
 
 @dataclass
 class ScanResult:
-    """Holds the aggregated output of a completed scan."""
+    """Хранит агрегированные результаты завершенного сетевого сканирования."""
 
     target: str
     resolved_ip: str
@@ -69,26 +69,26 @@ class ScanResult:
     )
 
     def to_dict(self) -> dict:
-        """Serialize to a plain dictionary suitable for JSON export."""
+        """Сериализация результатов в словарь для чистого JSON-экспорта."""
         data = asdict(self)
-        data["port_range"] = list(self.port_range)   # tuples aren't JSON-native
-        # JSON keys must be strings; convert int port keys.
+        data["port_range"] = list(self.port_range)
+        # Ключи в JSON должны быть строками: преобразуем целочисленные порты
         data["banners"] = {str(k): v for k, v in self.banners.items()}
         return data
 
 
-# ---------------------------------------------------------------------------
-# Core Scanner
-# ---------------------------------------------------------------------------
+# ==============================================================================
+# 3. АСИНХРОННЫЙ ДВИЖОК СКАНИРОВАНИЯ
+# ==============================================================================
 
 class AsyncPortScanner:
     """
-    Asynchronous TCP port scanner.
+    Высокопроизводительный асинхронный сканер TCP-портов.
 
     Attributes:
-        target      : Hostname or IP address to scan.
-        concurrency : Maximum number of simultaneous TCP probes.
-        timeout     : Per-connection timeout in seconds.
+        target: Имя хоста или IP-адрес цели сканирования.
+        concurrency: Максимальное количество одновременных сетевых соединений (семафор).
+        timeout: Таймаут на одно соединение в секундах.
     """
 
     def __init__(
@@ -100,28 +100,27 @@ class AsyncPortScanner:
         self.target = target
         self.concurrency = concurrency
         self.timeout = timeout
-        self._semaphore: asyncio.Semaphore  # initialised in scan()
+        self._semaphore: asyncio.Semaphore
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------------------
+    # Внутренние методы сканирования и анализа
+    # --------------------------------------------------------------------------
 
     async def _grab_banner(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> str:
         """
-        Attempt to retrieve a service banner from an already-open connection.
+        Захват сервисного баннера (Banner Grabbing) из установленного соединения.
 
-        Strategy:
-          1. Wait up to 1 s for a server-initiated greeting.
-          2. If the server is silent, send an HTTP GET trigger and wait again.
-          3. Decode the raw bytes, strip control characters, and return only
-             the first non-empty line as the banner.
+        Алгоритм работы:
+          1. Ожидание до 1 сек ответа от сервера (пассивный режим: SSH, FTP, SMTP).
+          2. Если сервер молчит — отправка HTTP GET триггера и повторное ожидание (активный режим).
+          3. Очистка байтов от управляющих символов и извлечение первой непустой строки.
 
         Args:
-            reader : Stream reader for the established connection.
-            writer : Stream writer (used to send the HTTP trigger if needed).
+            reader: Поток чтения установленного TCP-сокета.
+            writer: Поток записи для отправки триггерного запроса при необходимости.
 
         Returns:
-            A single-line string with the banner, or an empty string if none.
+            Строка с первой строкой баннера сервиса или пустая строка.
         """
         raw = b""
         try:
@@ -130,7 +129,7 @@ class AsyncPortScanner:
             pass
 
         if not raw:
-            # Server didn't send anything — try an HTTP GET trigger.
+            # Сервер не прислал приветствие пассивно — отправляем HTTP GET триггер
             try:
                 writer.write(b"GET / HTTP/1.1\r\n\r\n")
                 await writer.drain()
@@ -147,16 +146,16 @@ class AsyncPortScanner:
 
     async def _probe_port(self, port: int) -> Optional[tuple[int, str]]:
         """
-        Attempt a TCP connection to *port* on self.target and grab its banner.
+        Проверка одного TCP-порта на цели с захватом баннера сервиса.
 
-        Uses asyncio.wait_for to enforce a hard timeout, and the shared
-        semaphore to cap simultaneous connections.
+        Использует asyncio.wait_for для обеспечения жесткого таймаута
+        и общий семафор для ограничения параллельных соединений.
 
         Args:
-            port: The TCP port number to probe.
+            port: Номер целевого TCP-порта.
 
         Returns:
-            A (port, banner) tuple if the port is open, otherwise None.
+            Кортеж (порт, баннер), если порт открыт, иначе None.
         """
         async with self._semaphore:
             try:
@@ -174,41 +173,41 @@ class AsyncPortScanner:
                     pass
 
                 if banner:
-                    logger.debug("Port %d  ->  OPEN  |  banner: %s", port, banner)
+                    logger.debug("Порт %d  ->  ОТКРЫТ  |  баннер: %s", port, banner)
                 else:
-                    logger.debug("Port %d  ->  OPEN", port)
+                    logger.debug("Порт %d  ->  ОТКРЫТ", port)
                 return port, banner
 
             except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
-                logger.debug("Port %d  ->  closed / filtered", port)
+                logger.debug("Порт %d  ->  закрыт / фильтруется", port)
                 return None
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------------------
+    # Публичный интерфейс сканирования
+    # --------------------------------------------------------------------------
 
     async def scan(self, start_port: int, end_port: int) -> ScanResult:
         """
-        Scan all TCP ports in the inclusive range [start_port, end_port].
+        Асинхронное сканирование диапазона TCP-портов [start_port, end_port] включительно.
 
         Args:
-            start_port : First port in the range.
-            end_port   : Last port in the range (inclusive).
+            start_port: Начальный порт диапазона.
+            end_port: Конечный порт диапазона (включительно).
 
         Returns:
-            A populated ScanResult instance.
+            Заполненный экземпляр ScanResult с метриками и найденными портами.
         """
-        # Resolve the target once so every probe uses a stable IP.
+        # Единоразовый DNS-резолвинг цели для стабильности всех сетевых запросов
         try:
             resolved_ip = socket.gethostbyname(self.target)
         except socket.gaierror as exc:
-            logger.error("DNS resolution failed for '%s': %s", self.target, exc)
+            logger.error("Ошибка DNS-резолвинга для '%s': %s", self.target, exc)
             sys.exit(1)
 
         total_ports = end_port - start_port + 1
         logger.info(
-            "Scanning %s (%s) | ports %d-%d | %d ports | "
-            "concurrency %d | timeout %.1fs",
+            "Сканирование %s (%s) | порты %d-%d | всего: %d | "
+            "параллелизм: %d | таймаут: %.1fc",
             self.target,
             resolved_ip,
             start_port,
@@ -227,8 +226,7 @@ class AsyncPortScanner:
             for port in range(start_port, end_port + 1)
         ]
 
-        # Gather with return_exceptions=False; individual exceptions are
-        # already caught inside _probe_port, so this won't mask errors.
+        # Собираем результаты без сокрытия системных исключений
         raw_results: list[Optional[tuple[int, str]]] = await asyncio.gather(
             *tasks, return_exceptions=False
         )
@@ -259,56 +257,56 @@ class AsyncPortScanner:
 
     @staticmethod
     def _log_summary(result: ScanResult) -> None:
-        """Emit a structured summary once scanning is complete."""
+        """Вывод структурированного итогового отчета в консоль."""
         logger.info("-" * 60)
-        logger.info("Scan complete in %.3fs", result.scan_duration_seconds)
-        logger.info("Open ports found : %d", len(result.open_ports))
+        logger.info("Сканирование завершено за %.3fc", result.scan_duration_seconds)
+        logger.info("Найдено открытых портов : %d", len(result.open_ports))
         if result.open_ports:
-            logger.info("Open ports       : %s", result.open_ports)
+            logger.info("Открытые порты          : %s", result.open_ports)
             if result.banners:
-                logger.info("Banners captured : %d", len(result.banners))
+                logger.info("Захвачено баннеров      : %d", len(result.banners))
                 for port in result.open_ports:
                     banner = result.banners.get(port, "")
                     if banner:
                         logger.info("  %-6d  %s", port, banner)
         else:
-            logger.info("No open ports detected in the specified range.")
+            logger.info("Открытых портов в указанном диапазоне не обнаружено.")
         logger.info("-" * 60)
 
 
-# ---------------------------------------------------------------------------
-# JSON Export
-# ---------------------------------------------------------------------------
+# ==============================================================================
+# 4. ЭКСПОРТ В JSON
+# ==============================================================================
 
 def export_json(result: ScanResult, output_path: Path) -> None:
     """
-    Write a ScanResult to disk as a formatted JSON file.
+    Сохранение результатов сканирования в структурированный JSON-файл.
 
     Args:
-        result      : The completed scan result.
-        output_path : Destination file path (created/overwritten).
+        result: Объект результатов сканирования ScanResult.
+        output_path: Путь к целевому файлу.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as fh:
-        json.dump(result.to_dict(), fh, indent=2)
-    logger.info("Results exported -> %s", output_path.resolve())
+        json.dump(result.to_dict(), fh, indent=2, ensure_ascii=False)
+    logger.info("Результаты экспортированы -> %s", output_path.resolve())
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
+# ==============================================================================
+# 5. CLI ИНТЕРФЕЙС И ВАЛИДАЦИЯ
+# ==============================================================================
 
 def build_parser() -> argparse.ArgumentParser:
-    """Construct and return the CLI argument parser."""
+    """Создание и конфигурация парсера аргументов командной строки."""
     parser = argparse.ArgumentParser(
         prog="scanner",
         description=(
-            "Async TCP Port Scanner -- high-performance port scanning "
-            "with strict concurrency control and JSON export."
+            "⚡ Async TCP Port Scanner -- высокопроизводительный асинхронный сканер "
+            "с контролем параллелизма, захватом баннеров и экспортом в JSON."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
+Примеры использования:
   python scanner.py 192.168.1.1
   python scanner.py scanme.nmap.org -p 1-1024
   python scanner.py example.com -p 20-9000 -c 300 -t 1.5 -o results.json
@@ -319,40 +317,40 @@ Examples:
     parser.add_argument(
         "target",
         type=str,
-        help="Target hostname or IP address to scan.",
+        help="Имя хоста или IP-адрес цели сканирования.",
     )
     parser.add_argument(
         "-p", "--ports",
         type=str,
         default="1-1024",
         metavar="START-END",
-        help="Port range in START-END format (default: 1-1024).",
+        help="Диапазон портов в формате НАЧАЛО-КОНЕЦ (по умолчанию: 1-1024).",
     )
     parser.add_argument(
         "-c", "--concurrency",
         type=int,
         default=500,
         metavar="N",
-        help="Maximum simultaneous connections (default: 500).",
+        help="Максимальное число параллельных соединений (по умолчанию: 500).",
     )
     parser.add_argument(
         "-t", "--timeout",
         type=float,
         default=1.0,
         metavar="SECS",
-        help="Per-connection timeout in seconds (default: 1.0).",
+        help="Таймаут на соединение в секундах (по умолчанию: 1.0).",
     )
     parser.add_argument(
         "-o", "--output",
         type=str,
         default=None,
         metavar="FILE",
-        help="Path to write JSON results (optional).",
+        help="Путь для выгрузки отчета в формате JSON (опционально).",
     )
     parser.add_argument(
         "-v", "--verbose",
         action="store_true",
-        help="Enable DEBUG-level logging (shows every port probe).",
+        help="Подробный вывод уровня DEBUG (показывает проверку каждого порта).",
     )
 
     return parser
@@ -360,16 +358,16 @@ Examples:
 
 def parse_port_range(port_str: str) -> tuple[int, int]:
     """
-    Parse a 'START-END' string into a validated (start, end) tuple.
+    Парсинг и валидация строки диапазона портов 'НАЧАЛО-КОНЕЦ'.
 
     Args:
-        port_str: Port range string, e.g. '20-1024'.
+        port_str: Строка диапазона, например '20-1024'.
 
     Returns:
-        (start_port, end_port) integers.
+        Кортеж целых чисел (начальный_порт, конечный_порт).
 
     Raises:
-        SystemExit: If the format is invalid or values are out of range.
+        SystemExit: При некорректном формате или выходе за границы 1-65535.
     """
     try:
         parts = port_str.split("-")
@@ -378,28 +376,28 @@ def parse_port_range(port_str: str) -> tuple[int, int]:
         start, end = int(parts[0]), int(parts[1])
     except ValueError:
         logger.error(
-            "Invalid port range '%s'. Expected format: START-END (e.g. 1-1024).",
+            "Некорректный диапазон портов '%s'. Ожидается формат: НАЧАЛО-КОНЕЦ (например, 1-1024).",
             port_str,
         )
         sys.exit(1)
 
     if not (1 <= start <= 65535 and 1 <= end <= 65535):
-        logger.error("Ports must be in the range 1-65535.")
+        logger.error("Номера портов должны быть в диапазоне от 1 до 65535.")
         sys.exit(1)
 
     if start > end:
-        logger.error("Start port (%d) must be <= end port (%d).", start, end)
+        logger.error("Начальный порт (%d) не может быть больше конечного (%d).", start, end)
         sys.exit(1)
 
     return start, end
 
 
-# ---------------------------------------------------------------------------
-# Entry Point
-# ---------------------------------------------------------------------------
+# ==============================================================================
+# 6. ТОЧКА ВХОДА (MAIN)
+# ==============================================================================
 
 async def main() -> None:
-    """Async entry point: parse args, run scan, optionally export."""
+    """Главная асинхронная функция: парсинг аргументов, сканирование и экспорт."""
     parser = build_parser()
     args = parser.parse_args()
 
@@ -423,5 +421,5 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.warning("Scan interrupted by user.")
+        logger.warning("\nСканирование прервано пользователем.")
         sys.exit(130)
