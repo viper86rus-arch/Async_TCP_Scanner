@@ -1,82 +1,111 @@
-# ⚡ Async TCP Port Scanner
+# ⚡ Async TCP Port Scanner & Network Probe
 
-A **high-performance, production-grade TCP port scanner** built in pure Python using `asyncio`. Designed for speed, safety, and clean output — an ideal showcase of asynchronous systems programming.
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![Concurrency](https://img.shields.io/badge/Concurrency-asyncio-45ba4b.svg)](https://docs.python.org/3/library/asyncio.html)
+[![Networking](https://img.shields.io/badge/Network-TCP_Sockets-orange.svg)](https://github.com/viper86rus-arch/Async_TCP_Scanner)
+[![Banner Grabbing](https://img.shields.io/badge/Features-Banner_Grabbing-009688.svg)](https://github.com/viper86rus-arch/Async_TCP_Scanner)
+[![Dependencies](https://img.shields.io/badge/Dependencies-Zero_Pip-blueviolet.svg)](https://github.com/viper86rus-arch/Async_TCP_Scanner)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+> **Высокопроизводительный асинхронный сканер TCP-портов промышленного уровня на чистом Python.**  
+> Спроектирован на базе `asyncio` для сверхбыстрого и безопасного аудита сетевой инфраструктуры. Поддерживает контроль параллелизма через `asyncio.Semaphore`, жесткие таймауты соединений, гибридный захват баннеров сервисов (Active/Passive Banner Grabbing) и структурированный экспорт результатов в JSON. Работает на стандартной библиотеке без внешних зависимостей.
 
 ---
 
-## ✨ Features
+## 📑 Содержание
 
-| Feature | Details |
+- [Ключевые особенности](#-ключевые-особенности)
+- [Структура проекта](#-структура-проекта)
+- [Быстрый старт](#-быстрый-старт)
+- [Справочник аргументов CLI](#-справочник-аргументов-cli)
+- [Пример вывода в терминале](#-пример-вывода-в-терминале)
+- [Формат экспорта JSON](#-формат-экспорта-json)
+- [Архитектурные решения и инженерные нюансы](#-архитектурные-решения-и-инженерные-нюансы)
+  - [Почему asyncio вместо потоков?](#почему-asyncio-вместо-потоков)
+  - [Зачем нужен asyncio.Semaphore?](#зачем-нужен-asynciosemaphore)
+  - [Жесткие таймауты через asyncio.wait_for](#жесткие-таймауты-через-asynciowait_for)
+  - [Однократный DNS-резолвинг](#однократный-dns-резолвинг)
+  - [Механизм захвата баннеров сервисов (_grab_banner)](#механизм-захвата-баннеров-сервисов-_grab_banner)
+- [Техническая спецификация](#-техническая-спецификация)
+- [Правовое уведомление и этика](#️-правовое-уведомление-и-этика)
+- [Лицензия](#-лицензия)
+
+---
+
+## ✨ Ключевые особенности
+
+| Возможность | Описание реализации |
 |---|---|
-| **Asynchronous I/O** | Built entirely on `asyncio` — thousands of probes run concurrently in a single thread |
-| **Semaphore control** | `asyncio.Semaphore` enforces a hard cap on simultaneous connections (default: 500) |
-| **Hard timeouts** | `asyncio.wait_for` guarantees each probe is killed after N seconds — no hangs |
-| **Banner Grabbing** | Passively waits for a server greeting; falls back to an HTTP GET trigger if the server is silent — the first response line is captured as the banner |
-| **Clean CLI** | `argparse`-powered interface; specify target, port range, concurrency, timeout, and output |
-| **Levelled logging** | `INFO` by default (strategic output only); `--verbose` enables per-port `DEBUG` traces |
-| **JSON export** | Full scan metadata, open port list, and captured banners written to structured JSON |
-| **Type-annotated** | PEP 8 compliant, fully typed with `dataclasses` and `typing` hints |
-| **Graceful shutdown** | `KeyboardInterrupt` is caught cleanly — no tracebacks on Ctrl+C |
+| **Асинхронный I/O** | Построен полностью на `asyncio` — тысячи сетевых проб выполняются параллельно в едином потоке без накладных расходов ОС. |
+| **Семафорный контроль** | `asyncio.Semaphore` гарантирует жесткий потолок одновременных сокетов (по умолчанию 500), предотвращая отказ сети. |
+| **Жесткие таймауты** | `asyncio.wait_for` принудительно обрывает зависшие пробы по истечении N секунд — отсутствие блокировок и утечек сокетов. |
+| **Banner Grabbing** | Пассивное ожидание приветствия сервера (1 с); при тишине — отправка активного HTTP GET триггера и фиксация первой строки ответа. |
+| **Удобный CLI-интерфейс** | Полнофункциональный интерфейс на `argparse`: выбор цели, диапазона портов, уровня параллелизма, таймаута и файла отчёта. |
+| **Уровневое логирование** | Информативный вывод `INFO` по умолчанию; режим `--verbose` активирует `DEBUG`-трассировку каждой отдельной пробы. |
+| **Экспорт в JSON** | Полные метаданные сканирования, список открытых портов, баннеры и тайминги в чистом структурированном JSON. |
+| **Строгая типизация** | Соответствие стандарту PEP 8, полная типизация данных с использованием `dataclasses` и модуля `typing`. |
+| **Грациозное завершение** | Безопасный перехват `KeyboardInterrupt` (Ctrl+C) с корректным закрытием незавершённых сокетов без стектрейсов. |
 
 ---
 
-## 🏗️ Project Structure
+## 📁 Структура проекта
 
-```
+```text
 Async_TCP_Scanner/
-├── scanner.py       # Main scanner — all logic lives here
-├── README.md        # This file
-└── results/         # Auto-created when -o is used
-    └── *.json       # Exported scan reports
+├── scanner.py       # Основное ядро сканера — вся логика и CLI
+├── README.md        # Документация проекта
+└── results/         # Каталог автоматического сохранения отчётов
+    └── *.json       # Экспортированные JSON-отчёты сканирования
 ```
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Быстрый старт
 
-**Requirements:** Python 3.11+ (no third-party dependencies — stdlib only)
+**Системные требования:** Python 3.11+ (сторонние `pip`-зависимости **не требуются** — 100% Python Standard Library).
 
 ```bash
-# Clone / navigate to the project
+# Клонирование / переход в каталог проекта
+git clone https://github.com/viper86rus-arch/Async_TCP_Scanner.git
 cd Async_TCP_Scanner
 
-# Basic scan of the top 1024 ports
+# Базовое сканирование топ-1024 системных портов
 python scanner.py 192.168.1.1
 
-# Scan a hostname with a custom port range
+# Сканирование хоста с указанием диапазона портов
 python scanner.py scanme.nmap.org -p 1-1024
 
-# Full options: custom range, concurrency, timeout, and JSON export
+# Расширенный запуск: кастомный диапазон, параллелизм, таймаут и экспорт в JSON
 python scanner.py example.com -p 20-9000 -c 300 -t 1.5 -o results/scan.json
 
-# Full internet scan with high concurrency and verbose per-port output
+# Высокоскоростное сканирование всего диапазона (65535 портов) с подробным логом
 python scanner.py 10.0.0.1 -p 1-65535 -c 1000 --verbose
 ```
 
 ---
 
-## 📋 CLI Reference
+## 📋 Справочник аргументов CLI
 
-```
+```text
 usage: scanner [-h] [-p START-END] [-c N] [-t SECS] [-o FILE] [-v] target
 
-positional arguments:
-  target                Target hostname or IP address to scan.
+Позиционные аргументы:
+  target                Целевое доменное имя или IP-адрес для сканирования.
 
-options:
-  -h, --help            Show this help message and exit.
-  -p, --ports START-END Port range in START-END format (default: 1-1024).
-  -c, --concurrency N   Maximum simultaneous connections (default: 500).
-  -t, --timeout SECS    Per-connection timeout in seconds (default: 1.0).
-  -o, --output FILE     Path to write JSON results (optional).
-  -v, --verbose         Enable DEBUG-level logging (shows every port probe).
+Опциональные аргументы:
+  -h, --help            Показать справку и завершить работу.
+  -p, --ports START-END Диапазон портов в формате START-END (по умолчанию: 1-1024).
+  -c, --concurrency N   Максимальное число одновременных соединений (по умолчанию: 500).
+  -t, --timeout SECS    Таймаут одного сетевого соединения в секундах (по умолчанию: 1.0).
+  -o, --output FILE     Путь для сохранения структурированного отчёта JSON.
+  -v, --verbose         Включить подробный вывод уровня DEBUG (логирует каждый опрос).
 ```
 
 ---
 
-## 🖥️ Sample Output
+## 🖥️ Пример вывода в терминале
 
-```
+```text
 20:41:02  INFO      Scanning scanme.nmap.org (45.33.32.156) | ports 1-1024 | 1024 ports | concurrency 500 | timeout 1.0s
 20:41:05  INFO      ------------------------------------------------------------
 20:41:05  INFO      Scan complete in 3.142s
@@ -86,14 +115,14 @@ options:
 20:41:05  INFO        22     SSH-2.0-OpenSSH_6.6.1p1 Ubuntu-2ubuntu2.13
 20:41:05  INFO        80     HTTP/1.1 400 Bad Request
 20:41:05  INFO      ------------------------------------------------------------
-20:41:05  INFO      Results exported -> D:\AI_Server\Async_TCP_Scanner\results\scan.json
+20:41:05  INFO      Results exported -> results/scan.json
 ```
 
 ---
 
-## 📄 JSON Export Format
+## 📄 Формат экспорта JSON
 
-When `--output` is specified, a structured report is written to disk:
+При использовании флага `-o` сформированный структурированный отчёт сохраняется на диск:
 
 ```json
 {
@@ -114,43 +143,59 @@ When `--output` is specified, a structured report is written to disk:
 
 ---
 
-## ⚙️ Architecture & Design Decisions
+## ⚙️ Архитектурные решения и инженерные нюансы
 
-### Why `asyncio` instead of threads?
-TCP connection probing is **I/O-bound**, not CPU-bound. `asyncio` coroutines have negligible overhead compared to OS threads, allowing tens of thousands of concurrent probes without exhausting system resources.
+### Почему `asyncio` вместо потоков?
+Сетевой опрос TCP-портов — это классическая **I/O-bound** задача (ожидание сетевых ответов), а не вычисления CPU. Корутины `asyncio` обладают ничтожно малым оверхедом по памяти по сравнению с системными потоками ОС, что позволяет комфортно опрашивать десятки тысяч сокетов параллельно без деградации производительности.
 
-### Why `asyncio.Semaphore`?
-Raw `asyncio.gather` with thousands of tasks would spawn thousands of OS-level TCP connections simultaneously — risking:
-- **File descriptor exhaustion** (`OSError: [Errno 24] Too many open files`)
-- **Network stack overload** on the host
-- **Rate limiting / blacklisting** on the target
+### Зачем нужен `asyncio.Semaphore`?
+Прямой вызов `asyncio.gather` на тысячах портов без ограничений мгновенно породил бы тысячи одновременных системных сокетов. Это приводит к:
+- **Исчерпанию файловых дескрипторов** (`OSError: [Errno 24] Too many open files`);
+- **Перегрузке сетевого стека** хоста;
+- **Мгновенному бану** / сбросу пакетов файрволом целевого сервера.
 
-The semaphore acts as a **token bucket** — at most N probes run at any moment.
+Семафор выступает в роли регулятора (Token Bucket) — в любой микромомент времени активно ровно `N` соединений.
 
-### Why `asyncio.wait_for` instead of `asyncio.open_connection` timeout?
-`asyncio.open_connection` does not natively support a timeout parameter. Wrapping it in `asyncio.wait_for` guarantees the coroutine is **cancelled** (not just abandoned) after the deadline, preventing resource leaks.
+### Жесткие таймауты через `asyncio.wait_for`
+Стандартный метод `asyncio.open_connection` не принимает параметр таймаута напрямую. Оборачивание вызова в `asyncio.wait_for` гарантирует, что при истечении лимита времени корутина будет **принудительно отменена** (`CancelledError`), а сокет закрыт, исключая утечку ресурсов.
 
-### Single DNS resolution
-The target hostname is resolved **once** via `socket.gethostbyname()` before any probes begin. This prevents hammering DNS servers and ensures all probes target a consistent IP throughout the scan.
+### Однократный DNS-резолвинг
+Доменное имя цели преобразуется в IP-адрес **ровно один раз** перед запуском цикла опроса (`socket.gethostbyname`). Это исключает лишнюю нагрузку на DNS-серверы и защищает от ситуации, когда часть портов сканируется по разным IP в случае round-robin DNS.
 
-### Banner grabbing — `_grab_banner`
-After each successful TCP handshake, `_grab_banner` attempts to identify the service without slowing down the overall scan:
-1. **Passive read** — waits up to **1 second** for a server-initiated greeting (SSH, FTP, SMTP banners, etc.).
-2. **Active trigger** — if the server is silent, sends `GET / HTTP/1.1\r\n\r\n` and waits another **1 second** for the response (catches HTTP servers that only reply to requests).
-3. Only the **first line** of the response is kept (`split('\n')[0].strip()`), avoiding multi-line noise.
+### Механизм захвата баннеров сервисов (`_grab_banner`)
+После успешного трехстороннего рукопожатия TCP сканер идентифицирует сервис без замедления общего потока:
+1. **Пассивное чтение:** ожидание до 1.0 секунды приветствия от сервера (SSH, FTP, SMTP сразу отправляют заголовок).
+2. **Активный триггер:** если сервер молчит, отправляется `GET / HTTP/1.1\r\n\r\n` с ожиданием ответа до 1.0 с (для HTTP/веб-серверов).
+3. **Фильтрация:** сохраняется только первая значимая строка (`split('\n')[0].strip()`), отсекая многострочный мусор.
 
-The 1-second cap per phase ensures banner grabbing never becomes the bottleneck — a port that yields no banner adds at most 2 s of extra latency, absorbed by the semaphore-controlled concurrency pool. Ports with no banner are still reported as open; only ports with a non-empty first line receive a `banners` entry in the JSON output.
-
----
-
-## ⚠️ Legal & Ethical Notice
-
-> **Only scan systems you own or have explicit written permission to test.**
-> Unauthorized port scanning may be illegal under computer misuse laws in your jurisdiction.
-> This tool is provided for **educational and authorized security testing purposes only**.
+Лимит в 1 секунду на фазу гарантирует, что захват баннеров никогда не становится узким горлышком производительности.
 
 ---
 
-## 📜 License
+## 📋 Техническая спецификация
 
-MIT License — free to use, modify, and distribute with attribution.
+| Параметр | Значение |
+|---|---|
+| **Язык** | Python 3.11+ |
+| **Зависимости** | 0 сторонних библиотек (100% Standard Library: `asyncio`, `socket`, `argparse`) |
+| **Модель параллелизма** | Асинхронный Single-Thread Event Loop (`asyncio`) |
+| **Контроль сокетов** | Асинхронный семафор (`asyncio.Semaphore`) |
+| **Механизм таймаутов** | `asyncio.wait_for` с принудительной отменой задач |
+| **Идентификация служб** | Двухфазный Banner Grabbing (Passive Greeting + Active HTTP Probe) |
+| **Резолвинг DNS** | Однократный предварительный (`socket.gethostbyname`) |
+| **Форматы экспорта** | CLI stdout / структурированный JSON с таймингами |
+| **Обработка сигналов** | Корректный перехват `SIGINT` (Ctrl+C) |
+| **Кроссплатформенность** | Linux, macOS, Windows, Android (Termux / Antigravity) |
+
+---
+
+## ⚠️ Правовое уведомление и этика
+
+> **Сканируйте только те системы, которыми вы владеете или на аудит которых у вас есть официальное письменное разрешение.**  
+> Несанкционированное сканирование портов может классифицироваться как правонарушение в сфере компьютерной безопасности. Данный инструмент разработан исключительно для **образовательных целей и авторизованного аудита безопасности**.
+
+---
+
+## 📄 Лицензия
+
+Проект распространяется под свободной лицензией [MIT](LICENSE).
