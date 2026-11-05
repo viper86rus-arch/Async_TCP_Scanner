@@ -1,6 +1,7 @@
 # ⚡ Async TCP Port Scanner & Network Probe
 
-[![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![Tests](https://img.shields.io/badge/Tests-7%2F7%20Passed%20(100%25)-brightgreen.svg)](tests/)
+[![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![Concurrency](https://img.shields.io/badge/Concurrency-asyncio-45ba4b.svg)](https://docs.python.org/3/library/asyncio.html)
 [![Networking](https://img.shields.io/badge/Network-TCP_Sockets-orange.svg)](https://github.com/viper86rus-arch/Async_TCP_Scanner)
 [![Banner Grabbing](https://img.shields.io/badge/Features-Banner_Grabbing-009688.svg)](https://github.com/viper86rus-arch/Async_TCP_Scanner)
@@ -17,6 +18,7 @@
 - [Ключевые особенности](#-ключевые-особенности)
 - [Структура проекта](#-структура-проекта)
 - [Быстрый старт](#-быстрый-старт)
+- [Запуск тестов](#-запуск-тестов)
 - [Справочник аргументов CLI](#-справочник-аргументов-cli)
 - [Пример вывода в терминале](#-пример-вывода-в-терминале)
 - [Формат экспорта JSON](#-формат-экспорта-json)
@@ -52,10 +54,12 @@
 
 ```text
 Async_TCP_Scanner/
-├── scanner.py       # Основное ядро сканера — вся логика и CLI
-├── README.md        # Документация проекта
-└── results/         # Каталог автоматического сохранения отчётов
-    └── *.json       # Экспортированные JSON-отчёты сканирования
+├── scanner.py            # Основное ядро сканера — вся логика и CLI
+├── tests/
+│   └── test_scanner.py   # Модульный тестовый комплекс (unittest)
+├── README.md             # Полная документация проекта
+└── results/              # Каталог автоматического сохранения отчётов
+    └── *.json            # Экспортированные JSON-отчёты сканирования
 ```
 
 ---
@@ -81,6 +85,19 @@ python scanner.py example.com -p 20-9000 -c 300 -t 1.5 -o results/scan.json
 # Высокоскоростное сканирование всего диапазона (65535 портов) с подробным логом
 python scanner.py 10.0.0.1 -p 1-65535 -c 1000 --verbose
 ```
+
+---
+
+## 🧪 Запуск тестов
+
+Проект снабжен автономным модульным тестовым комплексом на базе стандартной библиотеки `unittest`:
+
+```bash
+# Запуск полного тестового набора
+python3 -m unittest discover -s tests -v
+```
+
+Все 7 тестов выполняются за миллисекунды, проверяя валидацию портов, модель данных `ScanResult`, экспорт JSON и асинхронные сокетные таймауты.
 
 ---
 

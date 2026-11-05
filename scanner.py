@@ -371,12 +371,15 @@ def parse_port_range(port_str: str) -> tuple[int, int]:
     """
     try:
         parts = port_str.split("-")
-        if len(parts) != 2:
+        if len(parts) == 1:
+            start = end = int(parts[0])
+        elif len(parts) == 2:
+            start, end = int(parts[0]), int(parts[1])
+        else:
             raise ValueError
-        start, end = int(parts[0]), int(parts[1])
     except ValueError:
         logger.error(
-            "Некорректный диапазон портов '%s'. Ожидается формат: НАЧАЛО-КОНЕЦ (например, 1-1024).",
+            "Некорректный диапазон портов '%s'. Ожидается формат: ПОРТ или НАЧАЛО-КОНЕЦ (например, 80 или 1-1024).",
             port_str,
         )
         sys.exit(1)
