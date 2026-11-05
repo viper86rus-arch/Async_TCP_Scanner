@@ -1,14 +1,15 @@
-# ⚡ Async TCP Port Scanner & Network Probe
+# ⚡ V1PER IT Solutions | Async TCP Port Scanner & Network Probe
 
 [![Tests](https://img.shields.io/badge/Tests-7%2F7%20Passed%20(100%25)-brightgreen.svg)](tests/)
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![Studio](https://img.shields.io/badge/Studio-V1PER_IT_Solutions-emerald.svg)]()
 [![Concurrency](https://img.shields.io/badge/Concurrency-asyncio-45ba4b.svg)](https://docs.python.org/3/library/asyncio.html)
 [![Networking](https://img.shields.io/badge/Network-TCP_Sockets-orange.svg)](https://github.com/viper86rus-arch/Async_TCP_Scanner)
 [![Banner Grabbing](https://img.shields.io/badge/Features-Banner_Grabbing-009688.svg)](https://github.com/viper86rus-arch/Async_TCP_Scanner)
 [![Dependencies](https://img.shields.io/badge/Dependencies-Zero_Pip-blueviolet.svg)](https://github.com/viper86rus-arch/Async_TCP_Scanner)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **Высокопроизводительный асинхронный сканер TCP-портов промышленного уровня на чистом Python.**  
+> **Высокопроизводительный асинхронный сканер TCP-портов промышленного уровня на чистом Python от студии V1PER IT Solutions.**  
 > Спроектирован на базе `asyncio` для сверхбыстрого и безопасного аудита сетевой инфраструктуры. Поддерживает контроль параллелизма через `asyncio.Semaphore`, жесткие таймауты соединений, гибридный захват баннеров сервисов (Active/Passive Banner Grabbing) и структурированный экспорт результатов в JSON. Работает на стандартной библиотеке без внешних зависимостей.
 
 ---
