@@ -19,7 +19,7 @@
 > - 🚨 **Алертинг и телеметрия:** мгновенные уведомления о сбоях, недоступности и аномалиях задержек в Telegram, Slack, почту.
 > - 📊 **Интеграция:** сбор метрик в Prometheus, Grafana, InfluxDB и корпоративные панели администрирования.
 >
-> 📩 **Заказать систему мониторинга:** [Создать заявку (Issue)](https://github.com/viper86rus-arch/Async_TCP_Scanner/issues) или написать в [Профиль студии V1PER](https://github.com/viper86rus-arch).
+> 📩 **Заказать систему мониторинга:** [Заказать на Kwork (Безопасная сделка)](https://kwork.ru/user/V1PER86RUS) • [Создать заявку (Issue)](https://github.com/viper86rus-arch/Async_TCP_Scanner/issues) • [Профиль студии](https://github.com/viper86rus-arch)
 
 ---
 
