@@ -1,3 +1,17 @@
-results/
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+
+# Results & Logs
+results/
+*.log
+
+# Environment credentials (Tier 1 Privacy Protocol)
+.env
+*.local
+
+# OS & IDE
+.DS_Store
+.idea/
+.vscode/
