@@ -21,7 +21,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
 import scanner
-from scanner import AsyncPortScanner, ScanResult, export_json, parse_port_range
+from scanner import AsyncPortScanner, ScanResult, export_json, parse_port_range, sanitize_banner
 
 
 class TestAsyncTCPScanner(unittest.TestCase):
@@ -120,6 +120,25 @@ class TestAsyncTCPScanner(unittest.TestCase):
 
         probe_res = asyncio.run(run_probe())
         self.assertIsNone(probe_res)
+
+    def test_sanitize_banner_ansi_and_length(self):
+        """Проверка санитизации баннеров (защита от ANSI Injection и флуда)."""
+        evil_ansi = "\x1b[2J\x1b[H\x1b[31;1mPWNED\x1b[0m\r\n"
+        cleaned = sanitize_banner(evil_ansi)
+        self.assertEqual(cleaned, "PWNED")
+        self.assertNotIn("\x1b", cleaned)
+        self.assertNotIn("\r", cleaned)
+
+        # Проверка усечения длины до 120 символов
+        huge_str = "A" * 200
+        truncated = sanitize_banner(huge_str, max_length=120)
+        self.assertEqual(len(truncated), 120)
+        self.assertTrue(truncated.endswith("..."))
+
+    def test_resolve_target_ipv6_and_ipv4(self):
+        """Проверка резолвинга IPv4, IPv6 и localhost."""
+        self.assertEqual(AsyncPortScanner._resolve_target("127.0.0.1"), "127.0.0.1")
+        self.assertEqual(AsyncPortScanner._resolve_target("::1"), "::1")
 
 
 if __name__ == "__main__":

@@ -19,9 +19,11 @@ import argparse
 import asyncio
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+import ipaddress
 import json
 import logging
 from pathlib import Path
+import re
 import socket
 import sys
 import time
@@ -78,8 +80,34 @@ class ScanResult:
 
 
 # ==============================================================================
-# 3. АСИНХРОННЫЙ ДВИЖОК СКАНИРОВАНИЯ
+# 3. САНИТИЗАЦИЯ И АСИНХРОННЫЙ ДВИЖОК СКАНИРОВАНИЯ
 # ==============================================================================
+
+ANSI_ESCAPE_PATTERN = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
+
+def sanitize_banner(raw_banner: str, max_length: int = 120) -> str:
+    """
+    Санитизация сервисного баннера (защита от ANSI Escape Injection CWE-150 / CWE-117):
+    1. Удаляет терминальные ANSI escape-последовательности.
+    2. Удаляет управляющие символы ASCII (коды < 32, включая \\r, \\0, \\x01-0x1f).
+    3. Ограничивает длину до max_length (по умолчанию 120 символов).
+    """
+    if not raw_banner:
+        return ""
+    # Удаляем ANSI escape-последовательности
+    cleaned = ANSI_ESCAPE_PATTERN.sub("", raw_banner)
+    # Фильтруем управляющие и непечатаемые символы
+    cleaned = "".join(
+        ch for ch in cleaned
+        if (32 <= ord(ch) <= 126 or ch.isalnum() or ch.isspace()) and ord(ch) >= 32
+    ).strip()
+    # Сжимаем множественные пробелы
+    cleaned = " ".join(cleaned.split())
+    if len(cleaned) > max_length:
+        cleaned = cleaned[:max_length - 3] + "..."
+    return cleaned
+
 
 class AsyncPortScanner:
     """
@@ -100,40 +128,65 @@ class AsyncPortScanner:
         self.target = target
         self.concurrency = concurrency
         self.timeout = timeout
-        self._semaphore: asyncio.Semaphore
+        self.resolved_ip: Optional[str] = None
+        self._semaphore: asyncio.Semaphore = asyncio.Semaphore(concurrency)
 
     # --------------------------------------------------------------------------
     # Внутренние методы сканирования и анализа
     # --------------------------------------------------------------------------
+
+    @staticmethod
+    def _resolve_target(target: str) -> str:
+        """
+        Универсальный DNS-резолвинг с поддержкой IPv4, IPv6 и доменных имен.
+        """
+        try:
+            ip_obj = ipaddress.ip_address(target)
+            return str(ip_obj)
+        except ValueError:
+            pass
+
+        try:
+            addr_info = socket.getaddrinfo(
+                target, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
+            )
+            if not addr_info:
+                raise socket.gaierror(f"Не удалось разрешить имя хоста: {target}")
+            return str(addr_info[0][4][0])
+        except socket.gaierror:
+            raise
 
     async def _grab_banner(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> str:
         """
         Захват сервисного баннера (Banner Grabbing) из установленного соединения.
 
         Алгоритм работы:
-          1. Ожидание до 1 сек ответа от сервера (пассивный режим: SSH, FTP, SMTP).
+          1. Ожидание ответа от сервера с динамическим таймаутом (пассивный режим: SSH, FTP, SMTP).
           2. Если сервер молчит — отправка HTTP GET триггера и повторное ожидание (активный режим).
-          3. Очистка байтов от управляющих символов и извлечение первой непустой строки.
+          3. Санитизация баннера и очистка от ANSI escape-последовательностей (CWE-150).
 
         Args:
             reader: Поток чтения установленного TCP-сокета.
             writer: Поток записи для отправки триггерного запроса при необходимости.
 
         Returns:
-            Строка с первой строкой баннера сервиса или пустая строка.
+            Санитизированная строка баннера сервиса или пустая строка.
         """
+        # Динамический таймаут: не более self.timeout / 2 и не более 1.0 сек
+        banner_timeout = max(0.02, min(self.timeout / 2.0, 1.0))
+
         raw = b""
         try:
-            raw = await asyncio.wait_for(reader.read(1024), timeout=1.0)
-        except asyncio.TimeoutError:
+            raw = await asyncio.wait_for(reader.read(1024), timeout=banner_timeout)
+        except (asyncio.TimeoutError, OSError):
             pass
 
         if not raw:
             # Сервер не прислал приветствие пассивно — отправляем HTTP GET триггер
             try:
                 writer.write(b"GET / HTTP/1.1\r\n\r\n")
-                await writer.drain()
-                raw = await asyncio.wait_for(reader.read(1024), timeout=1.0)
+                await asyncio.wait_for(writer.drain(), timeout=banner_timeout)
+                raw = await asyncio.wait_for(reader.read(1024), timeout=banner_timeout)
             except (asyncio.TimeoutError, OSError):
                 pass
 
@@ -142,14 +195,15 @@ class AsyncPortScanner:
 
         decoded = raw.decode(errors="replace")
         first_line = decoded.split("\n")[0].strip()
-        return first_line
+        return sanitize_banner(first_line, max_length=120)
 
     async def _probe_port(self, port: int) -> Optional[tuple[int, str]]:
         """
         Проверка одного TCP-порта на цели с захватом баннера сервиса.
 
-        Использует asyncio.wait_for для обеспечения жесткого таймаута
-        и общий семафор для ограничения параллельных соединений.
+        Использует asyncio.wait_for для обеспечения жесткого таймаута,
+        семафор для контроля параллелизма и гарантированное закрытие
+        сокетов в блоке finally для предотвращения утечек дескрипторов (CWE-404).
 
         Args:
             port: Номер целевого TCP-порта.
@@ -157,20 +211,19 @@ class AsyncPortScanner:
         Returns:
             Кортеж (порт, баннер), если порт открыт, иначе None.
         """
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(self.concurrency)
+
+        writer: Optional[asyncio.StreamWriter] = None
         async with self._semaphore:
             try:
+                target_host = self.resolved_ip or self.target
                 reader, writer = await asyncio.wait_for(
-                    asyncio.open_connection(self.target, port),
+                    asyncio.open_connection(target_host, port),
                     timeout=self.timeout,
                 )
 
                 banner = await self._grab_banner(reader, writer)
-
-                writer.close()
-                try:
-                    await writer.wait_closed()
-                except Exception:
-                    pass
 
                 if banner:
                     logger.debug("Порт %d  ->  ОТКРЫТ  |  баннер: %s", port, banner)
@@ -181,6 +234,16 @@ class AsyncPortScanner:
             except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
                 logger.debug("Порт %d  ->  закрыт / фильтруется", port)
                 return None
+            finally:
+                if writer is not None:
+                    try:
+                        writer.close()
+                    except Exception:
+                        pass
+                    try:
+                        await asyncio.shield(writer.wait_closed())
+                    except Exception:
+                        pass
 
     # --------------------------------------------------------------------------
     # Публичный интерфейс сканирования
@@ -188,7 +251,8 @@ class AsyncPortScanner:
 
     async def scan(self, start_port: int, end_port: int) -> ScanResult:
         """
-        Асинхронное сканирование диапазона TCP-портов [start_port, end_port] включительно.
+        Асинхронное сканирование диапазона TCP-портов [start_port, end_port] включительно
+        с использованием пула воркеров (Worker Pool) для постоянной O(1) памяти.
 
         Args:
             start_port: Начальный порт диапазона.
@@ -197,9 +261,9 @@ class AsyncPortScanner:
         Returns:
             Заполненный экземпляр ScanResult с метриками и найденными портами.
         """
-        # Единоразовый DNS-резолвинг цели для стабильности всех сетевых запросов
+        # Единоразовый DNS-резолвинг цели с поддержкой IPv4 и IPv6
         try:
-            resolved_ip = socket.gethostbyname(self.target)
+            self.resolved_ip = self._resolve_target(self.target)
         except socket.gaierror as exc:
             logger.error("Ошибка DNS-резолвинга для '%s': %s", self.target, exc)
             sys.exit(1)
@@ -209,7 +273,7 @@ class AsyncPortScanner:
             "Сканирование %s (%s) | порты %d-%d | всего: %d | "
             "параллелизм: %d | таймаут: %.1fc",
             self.target,
-            resolved_ip,
+            self.resolved_ip,
             start_port,
             end_port,
             total_ports,
@@ -218,24 +282,38 @@ class AsyncPortScanner:
         )
 
         self._semaphore = asyncio.Semaphore(self.concurrency)
-
         t0 = time.perf_counter()
 
-        tasks = [
-            asyncio.create_task(self._probe_port(port))
-            for port in range(start_port, end_port + 1)
-        ]
+        # Высокопроизводительный пул воркеров (Worker Pool):
+        # Вместо единовременного создания 65 535 тасок запускаем строго num_workers
+        queue: asyncio.Queue[int] = asyncio.Queue()
+        for port in range(start_port, end_port + 1):
+            queue.put_nowait(port)
 
-        # Собираем результаты без сокрытия системных исключений
-        raw_results: list[Optional[tuple[int, str]]] = await asyncio.gather(
-            *tasks, return_exceptions=False
-        )
+        results: list[tuple[int, str]] = []
+        lock = asyncio.Lock()
+
+        async def worker() -> None:
+            while True:
+                try:
+                    port = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                try:
+                    res = await self._probe_port(port)
+                    if res is not None:
+                        async with lock:
+                            results.append(res)
+                finally:
+                    queue.task_done()
+
+        num_workers = min(self.concurrency, total_ports)
+        workers = [asyncio.create_task(worker()) for _ in range(num_workers)]
+        await asyncio.gather(*workers)
 
         elapsed = time.perf_counter() - t0
 
-        open_entries = sorted(
-            (port, banner) for port, banner in (r for r in raw_results if r is not None)
-        )
+        open_entries = sorted(results, key=lambda x: x[0])
         open_ports = [port for port, _ in open_entries]
         banners: dict[int, str] = {
             port: banner for port, banner in open_entries if banner
@@ -243,7 +321,7 @@ class AsyncPortScanner:
 
         result = ScanResult(
             target=self.target,
-            resolved_ip=resolved_ip,
+            resolved_ip=self.resolved_ip,
             port_range=(start_port, end_port),
             concurrency=self.concurrency,
             timeout=self.timeout,
