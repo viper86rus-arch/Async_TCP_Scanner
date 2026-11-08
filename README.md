@@ -1,15 +1,15 @@
 # ⚡ V1PER IT Solutions | Async TCP Port Scanner & Network Probe
 
-[![Tests](https://img.shields.io/badge/Tests-9%2F9%20Passed%20(100%25)-brightgreen.svg)](tests/)
-[![Security Audit](https://img.shields.io/badge/Audit-7%2F7%20Stress%20Passed-brightgreen.svg)](audit_stress_test.py)
-[![Architecture](https://img.shields.io/badge/Architecture-Worker_Pool_O(1)-emerald.svg)](scanner.py)
-[![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
-[![Studio](https://img.shields.io/badge/Studio-V1PER_IT_Solutions-emerald.svg)]()
-[![Concurrency](https://img.shields.io/badge/Concurrency-asyncio-45ba4b.svg)](https://docs.python.org/3/library/asyncio.html)
-[![Networking](https://img.shields.io/badge/Network-TCP_IPv4%2FIPv6-orange.svg)](https://github.com/viper86rus-arch/Async_TCP_Scanner)
-[![Banner Grabbing](https://img.shields.io/badge/Security-ANSI_Sanitization-009688.svg)](https://github.com/viper86rus-arch/Async_TCP_Scanner)
-[![Dependencies](https://img.shields.io/badge/Dependencies-Zero_Pip-blueviolet.svg)](https://github.com/viper86rus-arch/Async_TCP_Scanner)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Tests](https://badgen.net/badge/Tests/9%2F9%20Passed/green)](tests/)
+[![Security Audit](https://badgen.net/badge/Security%20Audit/7%2F7%20Hardened/green)](audit_stress_test.py)
+[![Architecture](https://badgen.net/badge/Architecture/Worker%20Pool%20O(1)/green)](scanner.py)
+[![Python](https://badgen.net/badge/Python/3.10%20-%203.13/blue?icon=python)](https://www.python.org/)
+[![Studio](https://badgen.net/badge/Studio/V1PER%20IT%20Solutions/cyan)](https://github.com/viper86rus-arch)
+[![Concurrency](https://badgen.net/badge/Concurrency/asyncio/green)](https://docs.python.org/3/library/asyncio.html)
+[![Networking](https://badgen.net/badge/Network/TCP%20IPv4%20%26%20IPv6/orange)](scanner.py)
+[![Banner Grabbing](https://badgen.net/badge/Security/ANSI%20Sanitization/teal)](scanner.py)
+[![Dependencies](https://badgen.net/badge/Dependencies/Zero-Pip/purple)](https://github.com/viper86rus-arch/Async_TCP_Scanner)
+[![License: MIT](https://badgen.net/badge/license/MIT/yellow)](LICENSE)
 
 > **Высокопроизводительный асинхронный сканер TCP-портов промышленного уровня на чистом Python от студии V1PER IT Solutions.**  
 > Спроектирован на базе `asyncio` для сверхбыстрого и безопасного аудита сетевой инфраструктуры. Поддерживает контроль параллелизма через `asyncio.Semaphore`, жесткие таймауты соединений, гибридный захват баннеров сервисов (Active/Passive Banner Grabbing) и структурированный экспорт результатов в JSON. Работает на стандартной библиотеке без внешних зависимостей.
